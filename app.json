@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Bream",
+    "slug": "bream",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "assets/**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.bream.app"
+    },
+    "android": {
+      "package": "com.bream.app"
+    }
+  }
+}
