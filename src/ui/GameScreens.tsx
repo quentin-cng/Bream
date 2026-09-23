@@ -1,11 +1,20 @@
 import { useState, type ReactNode } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   getObjectsByCategory,
-  type PlaceableType,
+  type BuildableType,
 } from '../island/objectCatalog';
+import {
+  canUnlock,
+  getXpForNextLevel,
+  LEVEL_THRESHOLDS,
+  type PlayerState,
+} from '../progression/playerProgression';
+import type { StepSourceStatus } from '../health/stepSource';
+import { ENERGY_PACKS } from '../shop/energyPackCatalog';
 import { GameIcon, type GameIconName } from './GameIcon';
+import { GAME_COLORS, GAME_RADII, GAME_SHADOWS } from './gameTheme';
 
 function ScreenHeader({ eyebrow, title, subtitle, trailing }: {
   eyebrow: string;
@@ -57,17 +66,15 @@ type CollectionItem = {
   thumbnail?: number;
   description: string;
   footprint?: string;
-  placeableType?: PlaceableType;
+  placeableType?: BuildableType;
   locked?: boolean;
   comingSoon?: boolean;
 };
 
-const BUILDING_DESCRIPTIONS: Record<PlaceableType, string> = {
-  balconyHouse: 'Une maison accueillante avec un balcon ouvert sur les nuages.',
-  townBuilding: 'Un bâtiment élancé qui donne du relief à ton petit village.',
-  civicHouse: 'Une maison longue, idéale pour structurer un quartier.',
-  gardenHouse: 'Une petite maison compacte qui se glisse facilement partout.',
-  cozyCottage: 'Un cottage chaleureux pour créer un coin calme et cozy.',
+const BUILDING_DESCRIPTIONS: Record<BuildableType, string> = {
+  house1: 'Une maison bleue fantastique avec une petite tour.',
+  house2: 'Une maison de ville élancée qui donne du relief au village.',
+  house3: 'Un cottage rustique et chaleureux pour un coin calme.',
 };
 
 const BUILDABLE_COLLECTION_ITEMS: CollectionItem[] = getObjectsByCategory('buildings').map(
@@ -77,7 +84,7 @@ const BUILDABLE_COLLECTION_ITEMS: CollectionItem[] = getObjectsByCategory('build
     category: 'buildings',
     level: definition.unlockLevel,
     cost: definition.cost,
-    icon: type === 'townBuilding' ? 'building' : 'house',
+    icon: type === 'house2' ? 'building' : 'house',
     thumbnail: definition.thumbnail,
     description: BUILDING_DESCRIPTIONS[type],
     footprint: `${definition.footprint.width}×${definition.footprint.height}`,
@@ -99,32 +106,31 @@ const COLLECTION_ITEMS: CollectionItem[] = [
   ...FUTURE_COLLECTION_ITEMS,
 ];
 
-export function CollectionScreen({ onBuild }: { onBuild: (type: PlaceableType) => void }) {
+export function CollectionScreen({ playerLevel, onBuild }: {
+  playerLevel: number;
+  onBuild: (type: BuildableType) => void;
+}) {
   const [category, setCategory] = useState<CollectionCategory>('all');
-  const [selectedId, setSelectedId] = useState(BUILDABLE_COLLECTION_ITEMS[0]?.id ?? '');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const items = COLLECTION_ITEMS.filter((item) => category === 'all' || item.category === category);
-  const selectedItem = COLLECTION_ITEMS.find((item) => item.id === selectedId) ?? items[0];
+  const selectedItem = COLLECTION_ITEMS.find((item) => item.id === selectedId);
+  const selectedLocked = selectedItem
+    ? Boolean(selectedItem.locked) || !canUnlock(selectedItem.level, playerLevel)
+    : false;
 
   const selectCategory = (nextCategory: CollectionCategory) => {
     setCategory(nextCategory);
-    const firstItem = COLLECTION_ITEMS.find((item) => (
-      nextCategory === 'all' || item.category === nextCategory
-    ));
-    if (firstItem) setSelectedId(firstItem.id);
+    setSelectedId(null);
   };
   return (
-    <ScreenScroll>
-      <ScreenHeader
-        eyebrow="MON MONDE"
-        title="Collection"
-        subtitle="Découvre ce qui donnera vie à ton île."
-        trailing={(
-          <View style={styles.countBadge}>
-            <Text style={styles.countValue}>{BUILDABLE_COLLECTION_ITEMS.length}</Text>
-            <Text style={styles.countLabel}>débloqués</Text>
-          </View>
-        )}
-      />
+    <View style={styles.collectionScreen}>
+      <ScreenScroll>
+      <View style={styles.collectionHeader}>
+        <Text style={styles.collectionTitle}>Collection</Text>
+        <View style={styles.playerLevelBadge} accessibilityLabel={`Niveau actuel ${playerLevel}`}>
+          <Text style={styles.playerLevelBadgeText}>NIV. {playerLevel}</Text>
+        </View>
+      </View>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -148,147 +154,156 @@ export function CollectionScreen({ onBuild }: { onBuild: (type: PlaceableType) =
           </Pressable>
         ))}
       </ScrollView>
-      {selectedItem ? (
-        <View style={[
-          styles.collectionDetail,
-          (selectedItem.locked || selectedItem.comingSoon) && styles.collectionDetailLocked,
-        ]}>
-          <View style={styles.collectionDetailIcon}>
-            {selectedItem.thumbnail ? (
-              <Image source={selectedItem.thumbnail} resizeMode="contain" style={styles.collectionDetailImage} />
-            ) : (
-              <GameIcon
-                name={selectedItem.icon}
-                size={28}
-                color={selectedItem.locked || selectedItem.comingSoon ? '#C9A6FF' : '#C5EAF7'}
-                strokeWidth={1.9}
-              />
-            )}
-          </View>
-          <View style={styles.collectionDetailCopy}>
-            <Text style={styles.collectionDetailEyebrow}>
-              {selectedItem.locked ? `DÉBLOCAGE · NIVEAU ${selectedItem.level}` : selectedItem.comingSoon ? 'COMING SOON' : 'PRÊT À CONSTRUIRE'}
-            </Text>
-            <Text style={styles.collectionDetailTitle}>{selectedItem.name}</Text>
-            <Text numberOfLines={2} style={styles.collectionDetailText}>{selectedItem.description}</Text>
-            <View style={styles.collectionDetailMeta}>
-              {selectedItem.footprint ? (
-                <View style={styles.detailMetaPill}>
-                  <GameIcon name="footprint" size={9} color="#9ED4E7" />
-                  <Text style={styles.detailMetaText}>{selectedItem.footprint}</Text>
+      <View style={styles.collectionGrid}>
+        {items.map((item) => {
+          const locked = Boolean(item.locked) || !canUnlock(item.level, playerLevel);
+          return (
+            <Pressable
+              key={item.id}
+              accessibilityRole="button"
+              accessibilityState={{ selected: selectedId === item.id }}
+              onPress={() => setSelectedId(item.id)}
+              style={({ pressed }) => [
+                styles.objectCard,
+                !locked && !item.comingSoon && styles.objectCardOwned,
+                locked && styles.objectCardLocked,
+                selectedId === item.id && styles.objectCardSelected,
+                pressed && styles.objectCardPressed,
+              ]}
+            >
+              <View style={[styles.objectVisual, locked && styles.objectVisualLocked]}>
+                <View style={[styles.objectIconWrap, locked && styles.objectIconWrapLocked]}>
+                  {item.thumbnail ? (
+                    <Image source={item.thumbnail} resizeMode="contain" style={styles.objectThumbnail} />
+                  ) : (
+                    <GameIcon
+                      name={item.icon}
+                      size={28}
+                      color={locked ? '#85818A' : GAME_COLORS.primaryDark}
+                      strokeWidth={1.8}
+                    />
+                  )}
                 </View>
-              ) : null}
-              <View style={styles.detailMetaPill}>
-                <GameIcon name="energy" size={9} color="#FFD75A" />
-                <Text style={styles.detailMetaText}>{selectedItem.cost}</Text>
+                {locked ? (
+                  <View style={styles.lockOverlay}>
+                    <GameIcon name="lock" size={17} />
+                  </View>
+                ) : null}
+                {item.comingSoon ? (
+                  <View style={styles.cardBadge}><Text style={styles.cardBadgeText}>SOON</Text></View>
+                ) : null}
+              </View>
+              <Text numberOfLines={1} style={styles.objectName}>{item.name}</Text>
+              <Text style={styles.objectLevel}>{locked ? `Niveau ${item.level} requis` : `Niv. ${item.level}`}</Text>
+              {locked ? (
+                <View style={styles.levelRequirement}>
+                  <GameIcon name="lock" size={8} color="#C9A6FF" />
+                  <Text style={[styles.objectMeta, styles.lockedMeta]}>Verrouillé</Text>
+                </View>
+              ) : item.comingSoon ? (
+                <Text style={[styles.objectMeta, styles.specialMeta]}>Coming Soon</Text>
+              ) : (
+                <View style={styles.costBadge}>
+                  <GameIcon name="energy" size={8} color="#D99412" />
+                  <Text style={styles.costBadgeText}>{item.cost}</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+      </ScreenScroll>
+      {selectedItem ? (
+        <View style={[styles.collectionDetail, (selectedLocked || selectedItem.comingSoon) && styles.collectionDetailLocked]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Fermer les détails" onPress={() => setSelectedId(null)} style={styles.collectionDetailClose}>
+            <GameIcon name="cancel" size={18} color={GAME_COLORS.text} />
+          </Pressable>
+          <View style={styles.collectionDetailTop}>
+            <View style={styles.collectionDetailIcon}>
+              {selectedItem.thumbnail ? <Image source={selectedItem.thumbnail} resizeMode="contain" style={styles.collectionDetailImage} /> : (
+                <GameIcon name={selectedItem.icon} size={32} color={selectedLocked || selectedItem.comingSoon ? GAME_COLORS.purple : GAME_COLORS.primaryDark} />
+              )}
+            </View>
+            <View style={styles.collectionDetailCopy}>
+              <Text style={styles.collectionDetailEyebrow}>{selectedLocked ? `NIVEAU ${selectedItem.level} REQUIS` : selectedItem.comingSoon ? 'COMING SOON' : 'PRÊT À CONSTRUIRE'}</Text>
+              <Text style={styles.collectionDetailTitle}>{selectedItem.name}</Text>
+              <Text numberOfLines={2} style={styles.collectionDetailText}>{selectedItem.description}</Text>
+              <View style={styles.collectionDetailMeta}>
+                {selectedItem.footprint ? <View style={styles.detailMetaPill}><GameIcon name="footprint" size={13} color={GAME_COLORS.primaryDark} /><Text style={styles.detailMetaText}>{selectedItem.footprint}</Text></View> : null}
+                <View style={styles.detailMetaPill}><GameIcon name="energy" size={13} color="#D99412" /><Text style={styles.detailMetaText}>{selectedItem.cost}</Text></View>
               </View>
             </View>
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: !selectedItem.placeableType }}
-            disabled={!selectedItem.placeableType}
-            onPress={() => selectedItem.placeableType && onBuild(selectedItem.placeableType)}
-            style={({ pressed }) => [
-              styles.detailBuildButton,
-              !selectedItem.placeableType && styles.detailBuildButtonDisabled,
-              pressed && styles.primaryButtonPressed,
-            ]}
+            accessibilityState={{ disabled: selectedLocked || !selectedItem.placeableType }}
+            disabled={selectedLocked || !selectedItem.placeableType}
+            onPress={() => selectedItem.placeableType && !selectedLocked && onBuild(selectedItem.placeableType)}
+            style={({ pressed }) => [styles.detailBuildButton, (selectedLocked || !selectedItem.placeableType) && styles.detailBuildButtonDisabled, pressed && styles.primaryButtonPressed]}
           >
-            <GameIcon
-              name={selectedItem.placeableType ? 'building' : 'lock'}
-              size={14}
-              color="#FFFFFF"
-            />
-            <Text style={styles.detailBuildButtonText}>
-              {selectedItem.placeableType ? 'Construire' : selectedItem.comingSoon ? 'Bientôt' : 'Verrouillé'}
-            </Text>
+            <GameIcon name={selectedItem.placeableType && !selectedLocked ? 'building' : 'lock'} size={21} color="#FFFFFF" />
+            <Text style={styles.detailBuildButtonText}>{selectedLocked ? `Niveau ${selectedItem.level} requis` : selectedItem.placeableType ? 'Construire cet objet' : selectedItem.comingSoon ? 'Bientôt' : 'Verrouillé'}</Text>
           </Pressable>
         </View>
       ) : null}
-      <View style={styles.collectionGrid}>
-        {items.map((item) => (
-          <Pressable
-            key={item.id}
-            accessibilityRole="button"
-            accessibilityState={{ selected: selectedId === item.id }}
-            onPress={() => setSelectedId(item.id)}
-            style={({ pressed }) => [
-              styles.objectCard,
-              !item.locked && !item.comingSoon && styles.objectCardOwned,
-              item.locked && styles.objectCardLocked,
-              selectedId === item.id && styles.objectCardSelected,
-              pressed && styles.objectCardPressed,
-            ]}
-          >
-            <View style={[styles.objectVisual, item.locked && styles.objectVisualLocked]}>
-              <View style={[
-                styles.levelBadge,
-                item.locked && styles.levelBadgeLocked,
-                item.comingSoon && styles.levelBadgeSpecial,
-              ]}>
-                <Text style={styles.levelBadgeText}>NIV. {item.level}</Text>
-              </View>
-              <View style={[styles.objectIconWrap, item.locked && styles.objectIconWrapLocked]}>
-                {item.thumbnail ? (
-                  <Image source={item.thumbnail} resizeMode="contain" style={styles.objectThumbnail} />
-                ) : (
-                  <GameIcon
-                    name={item.icon}
-                    size={28}
-                    color={item.locked ? '#617585' : '#BFDFEE'}
-                    strokeWidth={1.8}
-                  />
-                )}
-              </View>
-              {item.locked ? (
-                <View style={styles.lockOverlay}>
-                  <GameIcon name="lock" size={17} />
-                </View>
-              ) : null}
-              {item.comingSoon ? (
-                <View style={styles.cardBadge}><Text style={styles.cardBadgeText}>SOON</Text></View>
-              ) : null}
-            </View>
-            <Text numberOfLines={1} style={styles.objectName}>{item.name}</Text>
-            {item.locked ? (
-              <View style={styles.levelRequirement}>
-                <GameIcon name="lock" size={8} color="#C9A6FF" />
-                <Text style={[styles.objectMeta, styles.lockedMeta]}>Niveau {item.level}</Text>
-              </View>
-            ) : item.comingSoon ? (
-              <Text style={[styles.objectMeta, styles.specialMeta]}>Coming Soon</Text>
-            ) : (
-              <View style={styles.costBadge}>
-                <GameIcon name="energy" size={8} color="#FFD75A" />
-                <Text style={styles.costBadgeText}>{item.cost}</Text>
-              </View>
-            )}
-          </Pressable>
-        ))}
-      </View>
-    </ScreenScroll>
+    </View>
   );
 }
 
-export function ShopScreen() {
+export function ShopScreen({ energy }: { energy: number }) {
+  const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
+  const selectedPack = ENERGY_PACKS.find((pack) => pack.id === selectedPackId);
   return (
     <ScreenScroll>
       <ScreenHeader
         eyebrow="NOUVEAUTÉS"
         title="Shop"
         subtitle="Des ambiances et objets cosmétiques pour personnaliser ton monde."
-        trailing={<CurrencyBadge />}
+        trailing={<CurrencyBadge energy={energy} />}
       />
       <View style={styles.featuredCard}>
         <View style={styles.featuredOrb}>
-          <GameIcon name="special" size={46} color="#B7D8EE" strokeWidth={1.5} />
+          <GameIcon name="special" size={46} color={GAME_COLORS.purple} strokeWidth={1.7} />
         </View>
         <Text style={styles.featuredEyebrow}>COLLECTION À VENIR</Text>
         <Text style={styles.featuredTitle}>Ciel d’aurore</Text>
         <Text style={styles.featuredText}>Une lumière douce et de nouvelles décorations célestes.</Text>
         <View style={styles.soonPill}><Text style={styles.soonPillText}>COMING SOON</Text></View>
       </View>
+      <Text style={styles.sectionTitle}>Énergie</Text>
+      <Text style={styles.energyPackIntro}>Des packs pour ton monde, bientôt disponibles. Aucun achat n’est possible actuellement.</Text>
+      <View style={styles.energyPackList}>
+        {ENERGY_PACKS.map((pack) => (
+          <Pressable
+            key={pack.id}
+            accessibilityRole="button"
+            accessibilityLabel={`${pack.name}, ${pack.amount} Énergie, bientôt disponible`}
+            accessibilityHint="Affiche un aperçu sans effectuer d’achat"
+            onPress={() => setSelectedPackId(pack.id)}
+            style={({ pressed }) => [
+              styles.energyPackCard,
+              !pack.enabled && styles.energyPackUnavailable,
+              selectedPackId === pack.id && styles.energyPackSelected,
+              pressed && styles.primaryButtonPressed,
+            ]}
+          >
+            <View style={styles.energyPackIcon}><GameIcon name={pack.icon} size={26} color="#D99412" strokeWidth={2.4} /></View>
+            <View style={styles.energyPackCopy}>
+              <Text style={styles.energyPackName}>{pack.name}</Text>
+              <Text style={styles.energyPackAmount}>+{String(pack.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} Énergie</Text>
+            </View>
+            <View style={styles.energyPackRight}>
+              <Text style={styles.energyPackSoon}>BIENTÔT</Text>
+              <Text style={styles.energyPackPrice}>{pack.displayPrice}</Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+      {selectedPack ? (
+        <View accessibilityLiveRegion="polite" style={styles.energyPackMessage}>
+          <Text style={styles.energyPackMessageText}>{selectedPack.name} : bientôt disponible. Aucun achat ni crédit d’Énergie effectué.</Text>
+        </View>
+      ) : null}
       <Text style={styles.sectionTitle}>À découvrir</Text>
       <View style={styles.shopGrid}>
         {[
@@ -307,13 +322,13 @@ export function ShopScreen() {
               tone === 'gold' && styles.shopVisualGold,
             ]}>
               <View style={styles.shopSoonBadge}><Text style={styles.shopSoonText}>BIENTÔT</Text></View>
-              <GameIcon name={icon as GameIconName} size={27} color="#B8D6EA" strokeWidth={1.7} />
+              <GameIcon name={icon as GameIconName} size={27} color={GAME_COLORS.primaryDark} strokeWidth={1.9} />
             </View>
             <Text style={styles.shopName}>{name}</Text>
             <View style={styles.shopMetaRow}>
               <Text style={styles.shopMeta}>Aperçu</Text>
               <View style={styles.shopCostBadge}>
-                <GameIcon name="energy" size={7} color="#FFD75A" />
+                <GameIcon name="energy" size={7} color="#D99412" />
                 <Text style={styles.shopCostText}>{cost}</Text>
               </View>
             </View>
@@ -324,11 +339,11 @@ export function ShopScreen() {
   );
 }
 
-function CurrencyBadge() {
+function CurrencyBadge({ energy }: { energy: number }) {
   return (
     <View style={styles.currencyBadge}>
-      <GameIcon name="energy" size={14} color="#F3D786" />
-      <Text style={styles.currencyValue}>240</Text>
+      <GameIcon name="energy" size={14} color="#D99412" />
+      <Text style={styles.currencyValue}>{energy}</Text>
     </View>
   );
 }
@@ -337,7 +352,7 @@ export function FriendsScreen() {
   return (
     <View style={styles.centeredScreen}>
       <View style={styles.comingSoonIcon}>
-        <GameIcon name="friends" size={42} color="#A9C8E6" />
+        <GameIcon name="friends" size={42} color={GAME_COLORS.primary} />
       </View>
       <Text style={styles.comingSoonEyebrow}>BIENTÔT</Text>
       <Text style={styles.comingSoonTitle}>Explorez ensemble</Text>
@@ -356,15 +371,38 @@ function ProfileRow({ icon, label, value }: {
 }) {
   return (
     <View style={styles.profileRow}>
-      <View style={styles.profileRowIcon}><GameIcon name={icon} size={17} color="#A9C8E6" /></View>
+      <View style={styles.profileRowIcon}><GameIcon name={icon} size={17} color={GAME_COLORS.primaryDark} /></View>
       <Text style={styles.profileRowLabel}>{label}</Text>
       <Text style={styles.profileRowValue}>{value}</Text>
-      <GameIcon name="arrow" size={18} color="#7188A1" />
+      <GameIcon name="arrow" size={18} color={GAME_COLORS.muted} />
     </View>
   );
 }
 
-export function ProfileScreen() {
+export function ProfileScreen({ player, healthStatus, healthBusy, onConnectHealth, onAddMockSteps, onAddMockEnergy, onAddMockXp, onResetLocalSave }: {
+  player: PlayerState;
+  healthStatus: StepSourceStatus;
+  healthBusy: boolean;
+  onConnectHealth: () => void;
+  onAddMockSteps: () => void;
+  onAddMockEnergy: (amount: number) => void;
+  onAddMockXp: () => void;
+  onResetLocalSave: () => void;
+}) {
+  const nextLevelXp = getXpForNextLevel(player.xp);
+  const currentLevelXp = LEVEL_THRESHOLDS[player.level - 1] ?? 0;
+  const xpProgress = nextLevelXp === null
+    ? 1
+    : Math.min(1, Math.max(0, (player.xp - currentLevelXp) / (nextLevelXp - currentLevelXp)));
+  const healthDescription: Record<StepSourceStatus, string> = {
+    connected: 'Connecté · pas du jour synchronisés',
+    'permission-required': 'Autorisation de lecture des pas requise',
+    denied: 'Accès refusé · réessaie ou autorise Bream dans Health Connect',
+    unavailable: 'Health Connect indisponible · installe-le ou mets-le à jour',
+    'no-data': 'Connecté · aucun pas disponible aujourd’hui',
+    mock: 'Données de démonstration',
+    error: 'Synchronisation impossible · réessaie',
+  };
   return (
     <ScreenScroll>
       <ScreenHeader eyebrow="TON ESPACE" title="Profil" subtitle="Tes préférences et ta progression en un coup d’œil." />
@@ -372,14 +410,30 @@ export function ProfileScreen() {
         <View style={styles.profileAvatar}><Text style={styles.profileInitial}>A</Text></View>
         <View style={styles.profileIdentityCopy}>
           <Text style={styles.profileName}>Alex</Text>
-          <Text style={styles.profileDetail}>Explorateur de l’île · données fictives</Text>
+          <Text style={styles.profileDetail}>Explorateur de l’île · {healthStatus === 'connected' || healthStatus === 'no-data' ? 'pas synchronisés' : 'progression locale'}</Text>
         </View>
+      </View>
+      <View style={styles.xpCard}>
+        <View style={styles.xpCardTop}>
+          <Text style={styles.xpCardHeading}>PROGRESSION</Text>
+          <View style={styles.xpLevelBadge}>
+            <Text style={styles.xpLevelBadgeText}>NIV. {player.level}</Text>
+          </View>
+        </View>
+        <View style={styles.xpNumbers}>
+          <Text style={styles.xpCurrent}>{player.xp} XP</Text>
+          <Text style={styles.xpTarget}>{nextLevelXp === null ? 'Niveau maximum' : `Prochain niveau : ${nextLevelXp} XP`}</Text>
+        </View>
+        <View style={styles.xpTrack} accessibilityLabel={nextLevelXp === null ? 'Niveau maximum atteint' : `${player.xp - currentLevelXp} XP sur ${nextLevelXp - currentLevelXp} pour le prochain niveau`}>
+          <View style={[styles.xpFill, { width: `${Math.round(xpProgress * 100)}%` }]} />
+        </View>
+        <Text style={styles.xpRemaining}>{nextLevelXp === null ? 'Tous les niveaux actuels sont débloqués' : `${nextLevelXp - player.xp} XP avant le niveau ${player.level + 1}`}</Text>
       </View>
       <View style={styles.statsGrid}>
         {[
-          { value: '128k', label: 'Pas au total', icon: 'steps' as const, tone: 'cyan' },
+          { value: String(player.steps), label: 'Pas du jour', icon: 'steps' as const, tone: 'cyan' },
           { value: '7', label: 'Jours de série', icon: 'streak' as const, tone: 'orange' },
-          { value: '240', label: 'Énergie', icon: 'energy' as const, tone: 'gold' },
+          { value: String(player.energy), label: 'Énergie', icon: 'energy' as const, tone: 'gold' },
         ].map(({ value, label, icon, tone }) => (
           <View key={label} style={[
             styles.statCard,
@@ -397,6 +451,23 @@ export function ProfileScreen() {
           </View>
         ))}
       </View>
+      {Platform.OS === 'android' ? (
+        <View style={styles.healthPanel}>
+          <View style={styles.healthPanelCopy}>
+            <Text style={styles.healthPanelTitle}>Pas · Health Connect</Text>
+            <Text style={styles.healthPanelStatus}>{healthDescription[healthStatus]}</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: healthBusy }}
+            disabled={healthBusy}
+            onPress={onConnectHealth}
+            style={({ pressed }) => [styles.healthPanelButton, pressed && styles.primaryButtonPressed]}
+          >
+            <Text style={styles.healthPanelButtonText}>{healthBusy ? '...' : healthStatus === 'connected' || healthStatus === 'no-data' ? 'Actualiser' : 'Connecter'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <Text style={styles.sectionTitle}>Compte et préférences</Text>
       <View style={styles.profileList}>
         <ProfileRow icon="account" label="Compte" value="Local" />
@@ -404,101 +475,124 @@ export function ProfileScreen() {
         <ProfileRow icon="settings" label="Réglages" value="" />
         <ProfileRow icon="statistics" label="Statistiques" value="Aperçu" />
       </View>
+      {__DEV__ ? (
+        <View style={styles.debugProgression}>
+          <Text style={styles.debugTitle}>TEST PROGRESSION · DÉVELOPPEMENT</Text>
+          <View style={styles.debugActions}>
+            {[
+              ...(player.dailySteps.source === 'mock' ? [{ label: '+1 000 pas', action: onAddMockSteps }] : []),
+              { label: '+500 Énergie', action: () => onAddMockEnergy(500) },
+              { label: '+5 000 Énergie', action: () => onAddMockEnergy(5000) },
+              { label: '+100 XP', action: onAddMockXp },
+            ].map(({ label, action }) => (
+              <Pressable key={label} accessibilityRole="button" onPress={action} style={styles.debugButton}>
+                <Text style={styles.debugButtonText}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable accessibilityRole="button" onPress={onResetLocalSave} style={styles.debugResetButton}>
+            <Text style={styles.debugResetText}>Réinitialiser la sauvegarde locale</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </ScreenScroll>
   );
 }
 
 const colors = {
-  navy: '#102A49',
-  navySoft: '#183858',
-  text: '#F3F8FD',
-  muted: '#A4B8CB',
-  accent: '#65CFF1',
-  green: '#63D47C',
-  gold: '#FFD75A',
-  purple: '#A881F1',
+  text: GAME_COLORS.ink,
+  muted: GAME_COLORS.muted,
+  accent: GAME_COLORS.primary,
 };
 
 const styles = StyleSheet.create({
+  collectionScreen: { flex: 1 },
+  collectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 14 },
+  collectionTitle: { color: GAME_COLORS.ink, fontSize: 30, fontWeight: '900', letterSpacing: -0.9 },
+  playerLevelBadge: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: GAME_RADII.control, backgroundColor: GAME_COLORS.primary, borderWidth: 2, borderColor: '#91DDFC', ...GAME_SHADOWS.soft },
+  playerLevelBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
   scroll: { flex: 1 },
   scrollContent: { paddingTop: 11, paddingBottom: 18 },
   header: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 13 },
   headerCopy: { flex: 1, paddingRight: 12 },
-  eyebrow: { color: '#82A9C4', fontSize: 7, fontWeight: '800', letterSpacing: 1.5 },
+  eyebrow: { color: GAME_COLORS.primaryDark, fontSize: 8, fontWeight: '900', letterSpacing: 1.4 },
   title: { color: colors.text, fontSize: 25, fontWeight: '800', letterSpacing: -0.8, marginTop: 2 },
   subtitle: { color: colors.muted, fontSize: 9, lineHeight: 14, marginTop: 3 },
-  countBadge: { alignItems: 'center', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 12, backgroundColor: '#1E5570', borderWidth: 1.5, borderColor: 'rgba(112, 213, 247, 0.42)', shadowColor: '#071522', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 5, elevation: 3 },
-  countValue: { color: '#D9F5FF', fontSize: 12, fontWeight: '900' },
-  countLabel: { color: colors.muted, fontSize: 6, fontWeight: '700' },
-  categoryRow: { gap: 5, paddingRight: 6, marginBottom: 11 },
-  categoryChip: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 11, backgroundColor: '#263B4D', borderWidth: 1.5, borderColor: 'rgba(162, 197, 222, 0.17)', shadowColor: '#071522', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.13, shadowRadius: 3, elevation: 2 },
-  categoryChipActive: { backgroundColor: '#70D1F1', borderColor: '#C8F1FF', shadowOpacity: 0.27 },
-  categoryChipPressed: { transform: [{ scale: 0.96 }], opacity: 0.9 },
-  categoryText: { color: '#D5E0E9', fontSize: 8, fontWeight: '700' },
-  categoryTextActive: { color: colors.navy },
-  collectionDetail: { minHeight: 112, flexDirection: 'row', alignItems: 'center', marginBottom: 11, padding: 10, borderRadius: 16, backgroundColor: '#1E4C5C', borderWidth: 1.5, borderColor: 'rgba(94, 211, 121, 0.58)', shadowColor: '#071522', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
-  collectionDetailLocked: { backgroundColor: '#352E4E', borderColor: 'rgba(170, 126, 229, 0.58)' },
-  collectionDetailIcon: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 16, backgroundColor: '#17191D', borderWidth: 1, borderColor: 'rgba(182, 224, 240, 0.16)' },
+  categoryRow: { gap: 5, paddingRight: 6, marginBottom: 17 },
+  categoryChip: { minHeight: 39, justifyContent: 'center', paddingHorizontal: 12, borderRadius: GAME_RADII.control, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  categoryChipActive: { backgroundColor: GAME_COLORS.primary, borderColor: '#8BDAFA' },
+  categoryChipPressed: { transform: [{ scale: 0.96 }, { translateY: 2 }], opacity: 0.9 },
+  categoryText: { color: GAME_COLORS.text, fontSize: 10, fontWeight: '800' },
+  categoryTextActive: { color: '#FFFFFF' },
+  collectionDetail: { position: 'absolute', left: 2, right: 2, bottom: 8, padding: 12, borderRadius: GAME_RADII.panel, backgroundColor: GAME_COLORS.cream, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.raised },
+  collectionDetailLocked: { backgroundColor: '#F5F0FA', borderColor: '#C7B7E5' },
+  collectionDetailTop: { flexDirection: 'row', alignItems: 'center', paddingRight: 25 },
+  collectionDetailClose: { position: 'absolute', top: 9, right: 9, width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#E6DED3', zIndex: 2 },
+  collectionDetailIcon: { width: 76, height: 76, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: GAME_RADII.card, backgroundColor: '#F0E9DF', borderWidth: 1, borderColor: GAME_COLORS.border },
   collectionDetailImage: { width: '100%', height: '100%' },
-  collectionDetailCopy: { flex: 1, minWidth: 0, marginHorizontal: 9 },
-  collectionDetailEyebrow: { color: '#72DC8C', fontSize: 5.5, fontWeight: '900', letterSpacing: 0.75 },
-  collectionDetailTitle: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', marginTop: 2 },
-  collectionDetailText: { color: '#B6C8D4', fontSize: 7, lineHeight: 10, marginTop: 2 },
-  collectionDetailMeta: { flexDirection: 'row', gap: 4, marginTop: 5 },
-  detailMetaPill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 5, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(8, 25, 36, 0.42)' },
-  detailMetaText: { color: '#D4E2EB', fontSize: 6, fontWeight: '800' },
-  detailBuildButton: { minWidth: 72, height: 42, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8, borderRadius: 12, backgroundColor: '#55CB6F', borderWidth: 1.5, borderColor: '#93E6A4', shadowColor: '#102C18', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.32, shadowRadius: 5, elevation: 4 },
-  detailBuildButtonDisabled: { backgroundColor: '#674D8D', borderColor: 'rgba(211, 178, 255, 0.34)', opacity: 0.78 },
-  detailBuildButtonText: { color: '#FFFFFF', fontSize: 6.5, fontWeight: '900' },
-  collectionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  objectCard: { width: '31.9%', minHeight: 132, padding: 6, borderRadius: 14, backgroundColor: '#263C4E', borderWidth: 1.5, borderColor: 'rgba(171, 204, 228, 0.2)', shadowColor: '#071522', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.26, shadowRadius: 8, elevation: 4 },
-  objectCardOwned: { borderColor: 'rgba(94, 211, 121, 0.7)', backgroundColor: '#294A55' },
-  objectCardLocked: { opacity: 0.82, backgroundColor: '#322D4A', borderColor: 'rgba(164, 120, 224, 0.56)' },
-  objectCardSelected: { borderColor: '#7BDCF8', backgroundColor: '#31576A', shadowOpacity: 0.38, transform: [{ translateY: -1 }] },
+  collectionDetailCopy: { flex: 1, minWidth: 0, marginLeft: 12 },
+  collectionDetailEyebrow: { color: GAME_COLORS.greenDark, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
+  collectionDetailTitle: { color: GAME_COLORS.ink, fontSize: 16, fontWeight: '900', marginTop: 2 },
+  collectionDetailText: { color: GAME_COLORS.muted, fontSize: 9, lineHeight: 12, marginTop: 3 },
+  collectionDetailMeta: { flexDirection: 'row', gap: 6, marginTop: 7 },
+  detailMetaPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, backgroundColor: GAME_COLORS.cardSoft },
+  detailMetaText: { color: GAME_COLORS.text, fontSize: 10, fontWeight: '900' },
+  detailBuildButton: { height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 10, borderRadius: GAME_RADII.control, backgroundColor: GAME_COLORS.green, borderWidth: 2, borderColor: '#B9EA97', ...GAME_SHADOWS.soft },
+  detailBuildButtonDisabled: { backgroundColor: GAME_COLORS.purple, borderColor: '#CFC0EE', opacity: 0.78 },
+  detailBuildButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
+  collectionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  objectCard: { width: '31%', minHeight: 172, padding: 6, borderRadius: GAME_RADII.card, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  objectCardOwned: { borderColor: '#A7D59F', backgroundColor: '#FFFDF8' },
+  objectCardLocked: { opacity: 0.72, backgroundColor: '#E7E4E5', borderColor: '#C9C3C6' },
+  objectCardSelected: { borderColor: GAME_COLORS.primary, backgroundColor: GAME_COLORS.primarySoft, transform: [{ translateY: -1 }] },
   objectCardPressed: { transform: [{ scale: 0.97 }], opacity: 0.92 },
-  objectVisual: { height: 77, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 10, backgroundColor: '#315A6C', borderWidth: 1, borderColor: 'rgba(128, 220, 239, 0.16)' },
-  objectVisualLocked: { backgroundColor: '#342E4C', borderColor: 'rgba(174, 130, 235, 0.18)' },
-  objectIconWrap: { width: '86%', height: '78%', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 12, backgroundColor: 'rgba(18, 24, 28, 0.72)' },
-  objectIconWrapLocked: { opacity: 0.55, backgroundColor: 'rgba(15, 30, 40, 0.4)' },
+  objectVisual: { height: 104, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: GAME_RADII.control, backgroundColor: '#E9F5F4', borderWidth: 1, borderColor: '#CFE6E4' },
+  objectVisualLocked: { backgroundColor: '#DCDADC', borderColor: '#CAC5CA' },
+  objectIconWrap: { width: '94%', height: '85%', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.28)' },
+  objectIconWrapLocked: { opacity: 0.55, backgroundColor: 'rgba(255,255,255,0.18)' },
   objectThumbnail: { width: '100%', height: '100%' },
-  lockOverlay: { position: 'absolute', width: 35, height: 35, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: 'rgba(79, 49, 113, 0.88)', borderWidth: 1, borderColor: 'rgba(205, 169, 255, 0.34)' },
-  levelBadge: { position: 'absolute', top: 5, left: 5, zIndex: 2, paddingHorizontal: 5, paddingVertical: 3, borderRadius: 6, backgroundColor: '#2A8EAD', borderWidth: 1, borderColor: 'rgba(163, 232, 251, 0.35)' },
-  levelBadgeLocked: { backgroundColor: '#704FA7', borderColor: 'rgba(214, 183, 255, 0.36)' },
-  levelBadgeSpecial: { backgroundColor: '#7654CD' },
-  levelBadgeText: { color: '#FFFFFF', fontSize: 5, fontWeight: '900', letterSpacing: 0.45 },
+  lockOverlay: { position: 'absolute', width: 35, height: 35, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: GAME_COLORS.purple, borderWidth: 1, borderColor: '#CFC0ED' },
   cardBadge: { position: 'absolute', top: 5, right: 5, paddingHorizontal: 5, paddingVertical: 3, borderRadius: 6, backgroundColor: '#7654CD' },
   cardBadgeText: { color: '#FFFFFF', fontSize: 5, fontWeight: '900', letterSpacing: 0.6 },
-  objectName: { color: colors.text, fontSize: 8, fontWeight: '800', marginTop: 7 },
-  objectMeta: { color: colors.muted, fontSize: 6, marginTop: 2, fontWeight: '700' },
+  objectName: { color: colors.text, fontSize: 11, fontWeight: '900', textAlign: 'center', marginTop: 7 },
+  objectLevel: { color: GAME_COLORS.muted, fontSize: 9, fontWeight: '700', textAlign: 'center', marginTop: 2 },
+  objectMeta: { color: colors.muted, fontSize: 8, marginTop: 3, fontWeight: '800' },
   lockedMeta: { color: '#C9A6FF' },
   specialMeta: { color: '#B99AF3' },
-  levelRequirement: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  costBadge: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3, paddingHorizontal: 5, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(100, 78, 18, 0.56)', borderWidth: 1, borderColor: 'rgba(255, 218, 90, 0.25)' },
-  costBadgeText: { color: '#FFE89A', fontSize: 6, fontWeight: '900' },
-  buildCallout: { marginTop: 11, padding: 12, borderRadius: 17, backgroundColor: '#224554', borderWidth: 1.5, borderColor: 'rgba(92, 213, 122, 0.48)', shadowColor: '#071522', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
-  calloutCopy: { marginBottom: 8 },
-  calloutEyebrow: { color: colors.green, fontSize: 8, fontWeight: '800', letterSpacing: 1.3 },
-  calloutTitle: { color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 2 },
-  calloutText: { color: colors.muted, fontSize: 8, lineHeight: 12, marginTop: 2 },
-  primaryButton: { height: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 12, backgroundColor: '#55CB6F', borderWidth: 1.5, borderColor: '#93E6A4', shadowColor: '#102C18', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 5, elevation: 5 },
+  levelRequirement: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 },
+  costBadge: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, backgroundColor: GAME_COLORS.goldSoft, borderWidth: 1, borderColor: '#E9CF83' },
+  costBadgeText: { color: '#7B5711', fontSize: 10, fontWeight: '900' },
   primaryButtonPressed: { transform: [{ scale: 0.985 }, { translateY: 2 }], shadowOffset: { width: 0, height: 1 }, elevation: 2 },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
-  currencyBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 14, backgroundColor: 'rgba(84, 66, 22, 0.94)', borderWidth: 1.5, borderColor: 'rgba(255, 215, 90, 0.48)', shadowColor: '#191305', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.28, shadowRadius: 5, elevation: 3 },
+  currencyBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: GAME_RADII.control, backgroundColor: GAME_COLORS.goldSoft, borderWidth: 1.5, borderColor: '#E7C966', ...GAME_SHADOWS.soft },
   currencyValue: { color: colors.text, fontSize: 12, fontWeight: '800' },
-  featuredCard: { minHeight: 138, justifyContent: 'flex-end', overflow: 'hidden', padding: 14, borderRadius: 17, backgroundColor: '#3C3568', borderWidth: 1.5, borderColor: 'rgba(190, 153, 245, 0.48)', shadowColor: '#0D081B', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 11, elevation: 5 },
-  featuredOrb: { position: 'absolute', top: -30, right: -4, width: 130, height: 130, alignItems: 'center', justifyContent: 'center', borderRadius: 65, backgroundColor: 'rgba(160, 119, 222, 0.28)' },
-  featuredEyebrow: { color: '#C9A6FF', fontSize: 8, fontWeight: '900', letterSpacing: 1.3 },
+  featuredCard: { minHeight: 138, justifyContent: 'flex-end', overflow: 'hidden', padding: 14, borderRadius: GAME_RADII.panel, backgroundColor: '#EEE8FF', borderWidth: 1.5, borderColor: '#CDBFEB', ...GAME_SHADOWS.soft },
+  featuredOrb: { position: 'absolute', top: -30, right: -4, width: 130, height: 130, alignItems: 'center', justifyContent: 'center', borderRadius: 65, backgroundColor: '#D9CDF6' },
+  featuredEyebrow: { color: '#7655B7', fontSize: 8, fontWeight: '900', letterSpacing: 1.3 },
   featuredTitle: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: 3 },
   featuredText: { width: '62%', color: colors.muted, fontSize: 9, lineHeight: 14, marginTop: 4 },
-  soonPill: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(152, 104, 219, 0.4)', borderWidth: 1, borderColor: 'rgba(215, 183, 255, 0.22)' },
-  soonPillText: { color: '#E1CCFF', fontSize: 7, fontWeight: '900', letterSpacing: 1 },
+  soonPill: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: GAME_COLORS.purple, borderWidth: 1, borderColor: '#CDBDEE' },
+  soonPillText: { color: '#FFFFFF', fontSize: 7, fontWeight: '900', letterSpacing: 1 },
   sectionTitle: { color: colors.text, fontSize: 13, fontWeight: '800', marginTop: 13, marginBottom: 7 },
+  energyPackIntro: { color: GAME_COLORS.muted, fontSize: 9, lineHeight: 14, marginBottom: 8 },
+  energyPackList: { gap: 8 },
+  energyPackCard: { minHeight: 76, flexDirection: 'row', alignItems: 'center', padding: 9, borderRadius: GAME_RADII.card, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: '#E4CC87', ...GAME_SHADOWS.soft },
+  energyPackUnavailable: { backgroundColor: '#FFFDF8' },
+  energyPackSelected: { borderColor: GAME_COLORS.gold, backgroundColor: '#FFF6D9' },
+  energyPackIcon: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center', borderRadius: GAME_RADII.control, backgroundColor: GAME_COLORS.goldSoft, borderWidth: 1.5, borderColor: '#E7C763' },
+  energyPackCopy: { flex: 1, minWidth: 0, marginLeft: 10 },
+  energyPackName: { color: GAME_COLORS.ink, fontSize: 11, fontWeight: '900' },
+  energyPackAmount: { color: '#9B7015', fontSize: 12, fontWeight: '900', marginTop: 3 },
+  energyPackRight: { alignItems: 'flex-end', marginLeft: 6 },
+  energyPackSoon: { color: '#FFFFFF', fontSize: 7, fontWeight: '900', letterSpacing: 0.5, paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6, overflow: 'hidden', backgroundColor: GAME_COLORS.purple },
+  energyPackPrice: { color: GAME_COLORS.muted, fontSize: 8, fontWeight: '700', marginTop: 5 },
+  energyPackMessage: { marginTop: 8, padding: 9, borderRadius: 10, backgroundColor: GAME_COLORS.goldSoft, borderWidth: 1, borderColor: '#E6C86E' },
+  energyPackMessageText: { color: '#71541B', fontSize: 9, lineHeight: 13, fontWeight: '700' },
   shopGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  shopCard: { width: '31.9%', padding: 6, borderRadius: 14, backgroundColor: '#294355', borderWidth: 1.5, borderColor: 'rgba(102, 193, 229, 0.32)', shadowColor: '#071522', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.23, shadowRadius: 7, elevation: 3 },
-  shopVisual: { height: 74, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 10, backgroundColor: '#315A70', borderWidth: 1, borderColor: 'rgba(122, 213, 244, 0.18)' },
-  shopVisualGreen: { backgroundColor: '#315D58', borderColor: 'rgba(99, 214, 124, 0.26)' },
-  shopVisualPurple: { backgroundColor: '#493D69', borderColor: 'rgba(190, 153, 245, 0.3)' },
-  shopVisualGold: { backgroundColor: '#65582E', borderColor: 'rgba(255, 215, 90, 0.28)' },
+  shopCard: { width: '31.9%', padding: 6, borderRadius: GAME_RADII.card, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  shopVisual: { height: 74, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: GAME_RADII.control, backgroundColor: GAME_COLORS.primarySoft, borderWidth: 1, borderColor: '#B6DFEF' },
+  shopVisualGreen: { backgroundColor: '#E4F4DD', borderColor: '#BEDDB1' },
+  shopVisualPurple: { backgroundColor: GAME_COLORS.purpleSoft, borderColor: '#CFC1EC' },
+  shopVisualGold: { backgroundColor: GAME_COLORS.goldSoft, borderColor: '#E5CB7B' },
   shopSoonBadge: { position: 'absolute', top: 5, right: 5, paddingHorizontal: 4, paddingVertical: 2, borderRadius: 5, backgroundColor: '#7654CD' },
   shopSoonText: { color: '#FFFFFF', fontSize: 4.5, fontWeight: '900', letterSpacing: 0.45 },
   shopName: { color: colors.text, fontSize: 8, fontWeight: '800', marginTop: 6 },
@@ -507,26 +601,50 @@ const styles = StyleSheet.create({
   shopCostBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 4, paddingVertical: 2, borderRadius: 5, backgroundColor: 'rgba(100, 78, 18, 0.55)' },
   shopCostText: { color: '#FFE89A', fontSize: 5.5, fontWeight: '900' },
   centeredScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 34, paddingBottom: 28 },
-  comingSoonIcon: { width: 92, height: 92, alignItems: 'center', justifyContent: 'center', borderRadius: 32, backgroundColor: 'rgba(25, 59, 89, 0.86)', borderWidth: 1, borderColor: 'rgba(176, 208, 235, 0.2)' },
+  comingSoonIcon: { width: 92, height: 92, alignItems: 'center', justifyContent: 'center', borderRadius: 32, backgroundColor: GAME_COLORS.primarySoft, borderWidth: 1.5, borderColor: '#A7DBF1', ...GAME_SHADOWS.soft },
   comingSoonEyebrow: { color: colors.accent, fontSize: 9, fontWeight: '800', letterSpacing: 1.8, marginTop: 18 },
   comingSoonTitle: { color: colors.text, fontSize: 25, fontWeight: '800', letterSpacing: -0.7, marginTop: 5 },
   comingSoonText: { maxWidth: 280, color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 7 },
-  profileIdentity: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 20, backgroundColor: '#193F5D', borderWidth: 1.5, borderColor: 'rgba(103, 203, 239, 0.34)', shadowColor: '#071522', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.22, shadowRadius: 9, elevation: 4 },
-  profileAvatar: { width: 54, height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: '#4E9ED0', borderWidth: 2, borderColor: '#90DDF7' },
+  profileIdentity: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: GAME_RADII.panel, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  profileAvatar: { width: 54, height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: GAME_COLORS.primary, borderWidth: 2, borderColor: '#98DFFC' },
   profileInitial: { color: '#FFFFFF', fontSize: 22, fontWeight: '800' },
   profileIdentityCopy: { flex: 1, marginLeft: 12 },
   profileName: { color: colors.text, fontSize: 17, fontWeight: '800' },
   profileDetail: { color: colors.muted, fontSize: 8, marginTop: 3 },
+  xpCard: { marginTop: 10, padding: 12, borderRadius: GAME_RADII.card, backgroundColor: GAME_COLORS.primarySoft, borderWidth: 1.5, borderColor: '#A7DBF0', ...GAME_SHADOWS.soft },
+  xpCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  xpCardHeading: { color: GAME_COLORS.primaryDark, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  xpLevelBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: GAME_COLORS.primary, borderWidth: 1, borderColor: '#8EDCF3' },
+  xpLevelBadgeText: { color: '#F3FBFF', fontSize: 10, fontWeight: '900' },
+  xpNumbers: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginTop: 8 },
+  xpCurrent: { color: GAME_COLORS.ink, fontSize: 18, fontWeight: '900' },
+  xpTarget: { color: GAME_COLORS.muted, fontSize: 10, fontWeight: '700' },
+  xpTrack: { height: 11, overflow: 'hidden', borderRadius: 6, backgroundColor: '#D5E8EE', borderWidth: 1, borderColor: '#B6D8E4', marginTop: 9 },
+  xpFill: { height: '100%', borderRadius: 5, backgroundColor: GAME_COLORS.primary },
+  xpRemaining: { color: GAME_COLORS.muted, fontSize: 9, fontWeight: '700', marginTop: 6 },
   statsGrid: { flexDirection: 'row', gap: 7, marginTop: 10 },
-  statCard: { flex: 1, minWidth: 0, paddingVertical: 11, paddingHorizontal: 8, borderRadius: 15, backgroundColor: '#183A53', borderWidth: 1.5, borderColor: 'rgba(164, 199, 228, 0.18)', shadowColor: '#071522', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.18, shadowRadius: 5, elevation: 3 },
-  statCardCyan: { backgroundColor: '#174B5B', borderColor: 'rgba(118, 224, 238, 0.35)' },
-  statCardOrange: { backgroundColor: '#593C39', borderColor: 'rgba(255, 155, 104, 0.38)' },
-  statCardGold: { backgroundColor: '#594C2B', borderColor: 'rgba(255, 215, 90, 0.38)' },
+  statCard: { flex: 1, minWidth: 0, paddingVertical: 11, paddingHorizontal: 8, borderRadius: GAME_RADII.card, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  statCardCyan: { backgroundColor: '#E4F7FB', borderColor: '#B4E0E8' },
+  statCardOrange: { backgroundColor: '#FFF0E3', borderColor: '#F0C6A3' },
+  statCardGold: { backgroundColor: GAME_COLORS.goldSoft, borderColor: '#E6CB79' },
   statValue: { color: colors.text, fontSize: 15, fontWeight: '800' },
   statLabel: { color: colors.muted, fontSize: 7, lineHeight: 10, marginTop: 2 },
-  profileList: { overflow: 'hidden', borderRadius: 18, backgroundColor: '#173A55', borderWidth: 1.5, borderColor: 'rgba(103, 190, 229, 0.28)', shadowColor: '#071522', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 7, elevation: 3 },
-  profileRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(155, 188, 217, 0.14)' },
-  profileRowIcon: { width: 29, height: 29, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'rgba(93, 141, 181, 0.17)' },
+  profileList: { overflow: 'hidden', borderRadius: GAME_RADII.card, backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  profileRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: GAME_COLORS.border },
+  profileRowIcon: { width: 29, height: 29, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: GAME_COLORS.primarySoft },
   profileRowLabel: { flex: 1, color: colors.text, fontSize: 10, fontWeight: '700', marginLeft: 9 },
   profileRowValue: { color: colors.muted, fontSize: 8, marginRight: 4 },
+  healthPanel: { marginTop: 14, padding: 12, borderRadius: GAME_RADII.card, flexDirection: 'row', alignItems: 'center', backgroundColor: GAME_COLORS.card, borderWidth: 1.5, borderColor: '#A8D6E8', ...GAME_SHADOWS.soft },
+  healthPanelCopy: { flex: 1, paddingRight: 8 },
+  healthPanelTitle: { color: GAME_COLORS.ink, fontSize: 12, fontWeight: '800' },
+  healthPanelStatus: { color: GAME_COLORS.muted, fontSize: 10, marginTop: 3 },
+  healthPanelButton: { minWidth: 82, minHeight: 38, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8, borderRadius: 11, backgroundColor: GAME_COLORS.primary, borderWidth: 1.5, borderColor: '#8ED5E9', ...GAME_SHADOWS.soft },
+  healthPanelButtonText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  debugProgression: { marginTop: 16, padding: 10, borderRadius: GAME_RADII.control, backgroundColor: '#EAE7E1', borderWidth: 1, borderColor: '#CFC8BE' },
+  debugTitle: { color: GAME_COLORS.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 },
+  debugActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  debugButton: { width: '48%', minHeight: 38, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderRadius: 9, backgroundColor: '#D9EAF0' },
+  debugButtonText: { color: GAME_COLORS.ink, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  debugResetButton: { minHeight: 38, alignItems: 'center', justifyContent: 'center', marginTop: 8, borderRadius: 9, backgroundColor: '#F7DDDD', borderWidth: 1, borderColor: '#D98789' },
+  debugResetText: { color: GAME_COLORS.redDark, fontSize: 10, fontWeight: '800' },
 });

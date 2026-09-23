@@ -5,122 +5,85 @@ export type ObjectFootprint = {
   height: number;
 };
 
-export type ObjectVisualConfig = {
-  scale: number;
-  rotationOffset: readonly [number, number, number];
-  positionOffset: readonly [number, number, number];
-  selectionHeight: number;
-};
-
 export type BuildableObjectDefinition = {
   name: string;
   category: ObjectCategory;
-  asset: number;
   thumbnail: number;
   footprint: ObjectFootprint;
   unlockLevel: number;
   cost: number;
-  glyph: string;
-  visual: ObjectVisualConfig;
+  xpReward: number;
 };
 
-// Metro requires static asset references. Geometry normalization remains data
-// driven here so rendering and placement never need per-model special cases.
+// Gameplay metadata only. The matching world-sprite dimensions and anchors
+// live in the separate isometric sprite catalog.
 export const OBJECT_DEFINITIONS = {
-  balconyHouse: {
-    name: 'Maison à balcon',
-    category: 'buildings',
-    asset: require('../../assets/houses/house__building_low_poly.glb'),
-    thumbnail: require('../../assets/houses/houses_images/house__building_low_poly_image.png'),
-    footprint: { width: 3, height: 3 },
-    unlockLevel: 1,
-    cost: 420,
-    glyph: '⌂',
-    visual: {
-      scale: 0.0186,
-      rotationOffset: [0, 0, 0],
-      positionOffset: [-0.1228, 0.4971, -0.3278],
-      selectionHeight: 0.24,
-    },
+  house1: {
+    name: 'Maison niveau 1', category: 'buildings',
+    thumbnail: require('../../assets/houses/house-level-1.png'),
+    footprint: { width: 3, height: 3 }, unlockLevel: 1, cost: 420, xpReward: 45,
   },
-  townBuilding: {
-    name: 'Maison de ville',
-    category: 'buildings',
-    asset: require('../../assets/houses/low_poly_building.glb'),
-    thumbnail: require('../../assets/houses/houses_images/low_poly_building_image.png'),
-    footprint: { width: 3, height: 3 },
-    unlockLevel: 1,
-    cost: 520,
-    glyph: '▥',
-    visual: {
-      scale: 0.00155,
-      rotationOffset: [0, 0, 0],
-      positionOffset: [1.8446, 0, -16.9195],
-      selectionHeight: 0.29,
-    },
+  house2: {
+    name: 'Maison de ville', category: 'buildings',
+    thumbnail: require('../../assets/houses/house-level-1.png'),
+    footprint: { width: 2, height: 2 }, unlockLevel: 1, cost: 360, xpReward: 35,
   },
-  civicHouse: {
-    name: 'Maison longue',
-    category: 'buildings',
-    asset: require('../../assets/houses/low_poly_house_1.glb'),
-    thumbnail: require('../../assets/houses/houses_images/low_poly_house_1_image.png'),
-    footprint: { width: 2, height: 3 },
-    unlockLevel: 1,
-    cost: 360,
-    glyph: '⌂',
-    visual: {
-      scale: 0.0475,
-      rotationOffset: [0, 0, 0],
-      positionOffset: [-0.1877, 0, 0.2161],
-      selectionHeight: 0.15,
-    },
-  },
-  gardenHouse: {
-    name: 'Petite maison',
-    category: 'buildings',
-    asset: require('../../assets/houses/low_poly_house_5.glb'),
-    thumbnail: require('../../assets/houses/houses_images/low_poly_house_5.png'),
-    footprint: { width: 2, height: 2 },
-    unlockLevel: 1,
-    cost: 300,
-    glyph: '⌂',
-    visual: {
-      scale: 0.0422,
-      rotationOffset: [0, 0, 0],
-      positionOffset: [-0.4192, 0, 0],
-      selectionHeight: 0.15,
-    },
-  },
-  cozyCottage: {
-    name: 'Cottage doux',
-    category: 'buildings',
-    asset: require('../../assets/houses/stylizes_low-poly_house.glb'),
-    thumbnail: require('../../assets/houses/houses_images/stylizes_low-poly_house_image.png'),
-    footprint: { width: 3, height: 3 },
-    unlockLevel: 1,
-    cost: 460,
-    glyph: '⌁',
-    visual: {
-      scale: 0.021,
-      rotationOffset: [0, 0, 0],
-      positionOffset: [-1.6649, 0, 0.4296],
-      selectionHeight: 0.16,
-    },
+  house3: {
+    name: 'Cottage rustique', category: 'buildings',
+    thumbnail: require('../../assets/houses/house-level-1.png'),
+    footprint: { width: 2, height: 2 }, unlockLevel: 1, cost: 300, xpReward: 30,
   },
 } as const satisfies Record<string, BuildableObjectDefinition>;
 
-export type PlaceableType = keyof typeof OBJECT_DEFINITIONS;
+export type BuildableType = keyof typeof OBJECT_DEFINITIONS;
 
-export const BUILD_CATEGORIES: ReadonlyArray<{
-  id: ObjectCategory;
-  label: string;
-}> = [
+// Keep old types valid for save compatibility, but only propose the new base
+// house until matching art is available for the remaining definitions.
+const ACTIVE_BUILDABLE_TYPES: ReadonlySet<BuildableType> = new Set(['house1']);
+
+// Old save records keep their original type and footprint. They can be edited
+// but are not offered for new construction. displayAs is only a 2D art fallback.
+export const LEGACY_OBJECT_DEFINITIONS = {
+  balconyHouse: { name: 'Maison à balcon', footprint: { width: 3, height: 3 }, displayAs: 'house1', originalCost: 420 },
+  townBuilding: { name: 'Ancienne maison de ville', footprint: { width: 3, height: 3 }, displayAs: 'house1', originalCost: 520 },
+  civicHouse: { name: 'Maison longue', footprint: { width: 2, height: 3 }, displayAs: 'house3', originalCost: 360 },
+  gardenHouse: { name: 'Petite maison', footprint: { width: 2, height: 2 }, displayAs: 'house3', originalCost: 300 },
+  cozyCottage: { name: 'Cottage doux', footprint: { width: 3, height: 3 }, displayAs: 'house1', originalCost: 460 },
+} as const satisfies Record<string, { name: string; footprint: ObjectFootprint; displayAs: BuildableType; originalCost: number }>;
+
+export type LegacyPlaceableType = keyof typeof LEGACY_OBJECT_DEFINITIONS;
+export type PlaceableType = BuildableType | LegacyPlaceableType;
+
+export function isBuildableType(value: unknown): value is BuildableType {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(OBJECT_DEFINITIONS, value);
+}
+
+export function isPlaceableType(value: unknown): value is PlaceableType {
+  return isBuildableType(value)
+    || (typeof value === 'string' && Object.prototype.hasOwnProperty.call(LEGACY_OBJECT_DEFINITIONS, value));
+}
+
+export function getObjectFootprint(type: PlaceableType): ObjectFootprint {
+  return isBuildableType(type) ? OBJECT_DEFINITIONS[type].footprint : LEGACY_OBJECT_DEFINITIONS[type].footprint;
+}
+
+export function getObjectDefinition(type: PlaceableType): BuildableObjectDefinition {
+  if (isBuildableType(type)) return OBJECT_DEFINITIONS[type];
+  const legacy = LEGACY_OBJECT_DEFINITIONS[type];
+  return {
+    ...OBJECT_DEFINITIONS[legacy.displayAs],
+    name: legacy.name,
+    footprint: legacy.footprint,
+    cost: legacy.originalCost,
+    xpReward: 0,
+  };
+}
+
+export const BUILD_CATEGORIES: ReadonlyArray<{ id: ObjectCategory; label: string }> = [
   { id: 'buildings', label: 'Bâtiments' },
 ];
 
-export function getObjectsByCategory(category: ObjectCategory) {
-  return (Object.entries(OBJECT_DEFINITIONS) as Array<[
-    PlaceableType,
-    BuildableObjectDefinition,
-  ]>).filter(([, definition]) => definition.category === category);
+export function getObjectsByCategory(category: ObjectCategory): Array<[BuildableType, BuildableObjectDefinition]> {
+  return (Object.entries(OBJECT_DEFINITIONS) as Array<[BuildableType, BuildableObjectDefinition]>)
+    .filter(([type, definition]) => definition.category === category && ACTIVE_BUILDABLE_TYPES.has(type));
 }

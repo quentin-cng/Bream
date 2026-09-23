@@ -1,17 +1,15 @@
-const GRID_COLUMNS = 44;
-const GRID_ROWS = 44;
-const PLAYABLE_WIDTH = 4.08;
-const GRID_CENTER_X = 0.7;
-const GRID_CENTER_Z = 0.2;
-const GRID_CELL_SIZE = PLAYABLE_WIDTH / GRID_COLUMNS;
+const GRID_COLUMNS = 52;
+const GRID_ROWS = 52;
+
+// The 52 × 52 grid is centered on the enlarged island art. A 28-cell radius
+// leaves a visual margin at the four grassy corners while fully containing the
+// former 44 × 44 playable mask, so valid legacy placements remain valid.
+const PLAYABLE_RADIUS_X = 28;
+const PLAYABLE_RADIUS_Y = 28;
 
 export const GRID_CONFIG = {
   columns: GRID_COLUMNS,
   rows: GRID_ROWS,
-  cellSize: GRID_CELL_SIZE,
-  originX: GRID_CENTER_X - (GRID_COLUMNS - 1) / 2 * GRID_CELL_SIZE,
-  originZ: GRID_CENTER_Z - (GRID_ROWS - 1) / 2 * GRID_CELL_SIZE,
-  surfaceY: 3.045,
 } as const;
 
 export type GridCell = {
@@ -42,8 +40,15 @@ export function cellKey(cell: GridCell): string {
   return `${cell.gridX}:${cell.gridY}`;
 }
 
+export function createPlacementId(type: PlaceableType, placements: BuildingPlacement[]): string {
+  const existingIds = new Set(placements.map((placement) => placement.id));
+  let suffix = placements.length + 1;
+  while (existingIds.has(`${type}-${suffix}`)) suffix += 1;
+  return `${type}-${suffix}`;
+}
+
 // The source island has a rounded top. The logical grid remains rectangular,
-// while this generated mask removes only the corner cells that sit too close
+// while this generated ellipse removes only corner cells that sit too close
 // to the visible cliff edge.
 export function isPlayableCell(cell: GridCell): boolean {
   if (
@@ -55,8 +60,8 @@ export function isPlayableCell(cell: GridCell): boolean {
 
   const centerX = (GRID_CONFIG.columns - 1) / 2;
   const centerY = (GRID_CONFIG.rows - 1) / 2;
-  const normalizedX = (cell.gridX - centerX) / (GRID_CONFIG.columns / 2);
-  const normalizedY = (cell.gridY - centerY) / (GRID_CONFIG.rows / 2);
+  const normalizedX = (cell.gridX - centerX) / PLAYABLE_RADIUS_X;
+  const normalizedY = (cell.gridY - centerY) / PLAYABLE_RADIUS_Y;
   return normalizedX * normalizedX + normalizedY * normalizedY <= 1;
 }
 
@@ -76,19 +81,11 @@ const PLACEMENT_SEARCH_CELLS = [...PLAYABLE_GRID_CELLS].sort((a, b) => {
   return distanceA - distanceB;
 });
 
-export function gridCellToWorld(cell: GridCell): [number, number, number] {
-  return [
-    GRID_CONFIG.originX + cell.gridX * GRID_CONFIG.cellSize,
-    GRID_CONFIG.surfaceY,
-    GRID_CONFIG.originZ + cell.gridY * GRID_CONFIG.cellSize,
-  ];
-}
-
 export function getRotatedFootprint(
   type: PlaceableType,
   rotationQuarterTurns: number,
 ): Footprint {
-  return rotateFootprint(OBJECT_DEFINITIONS[type].footprint, rotationQuarterTurns);
+  return rotateFootprint(getObjectFootprint(type), rotationQuarterTurns);
 }
 
 export function rotateFootprint(
@@ -150,17 +147,6 @@ function validatePlacementAgainstOccupied(
   };
 }
 
-export function placementWorldPosition(placement: BuildingDraft): [number, number, number] {
-  const footprint = getRotatedFootprint(placement.type, placement.rotationQuarterTurns);
-  return [
-    GRID_CONFIG.originX
-      + (placement.gridX + (footprint.width - 1) / 2) * GRID_CONFIG.cellSize,
-    GRID_CONFIG.surfaceY,
-    GRID_CONFIG.originZ
-      + (placement.gridY + (footprint.height - 1) / 2) * GRID_CONFIG.cellSize,
-  ];
-}
-
 export function movePlacementToCell(
   placement: BuildingDraft,
   target: GridCell,
@@ -190,7 +176,7 @@ export function findFirstValidPlacement(
   return null;
 }
 import {
-  OBJECT_DEFINITIONS,
+  getObjectFootprint,
   type ObjectFootprint,
   type PlaceableType,
 } from './objectCatalog';

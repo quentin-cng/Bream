@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GameIcon, type GameIconName } from './GameIcon';
+import { GAME_COLORS, GAME_RADII, GAME_SHADOWS } from './gameTheme';
 
 export type MainTab = 'shop' | 'collection' | 'island' | 'friends' | 'profile';
 
@@ -42,9 +43,9 @@ export function GameNav({ activeTab, onSelect }: {
             ]}>
               <GameIcon
                 name={tab.icon}
-                size={primary ? 24 : 18}
-                color={primary && active ? '#15354B' : active ? '#DDF3FF' : '#829BB0'}
-                strokeWidth={active ? 2.35 : 2}
+                size={primary ? 35 : 26}
+                color={primary && active ? GAME_COLORS.primaryDark : active ? GAME_COLORS.primaryDark : '#6F7787'}
+                strokeWidth={active ? 2.8 : 2.3}
               />
             </View>
             <Text style={[styles.label, active && styles.labelActive]}>{tab.label}</Text>
@@ -58,23 +59,21 @@ export function GameNav({ activeTab, onSelect }: {
 
 const styles = StyleSheet.create({
   shell: {
-    height: 72,
+    height: 92,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 7,
     paddingTop: 8,
     paddingBottom: 6,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    backgroundColor: '#0D2232',
+    borderTopLeftRadius: GAME_RADII.panel,
+    borderTopRightRadius: GAME_RADII.panel,
+    backgroundColor: GAME_COLORS.cream,
     borderTopWidth: 1.5,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderColor: 'rgba(108, 177, 214, 0.3)',
-    shadowColor: '#071629',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.38,
-    shadowRadius: 15,
+    borderColor: GAME_COLORS.border,
+    shadowColor: GAME_COLORS.shadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
     elevation: 12,
   },
   tab: {
@@ -82,58 +81,58 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 0,
-    height: 55,
-    borderRadius: 15,
+    height: 72,
+    marginHorizontal: 2,
+    borderRadius: GAME_RADII.control,
     borderWidth: 1,
     borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
-  tabActive: { backgroundColor: '#1F5573', borderColor: 'rgba(119, 213, 245, 0.35)' },
-  tabPressed: { transform: [{ scale: 0.96 }], opacity: 0.9 },
+  tabActive: { backgroundColor: GAME_COLORS.white, borderColor: GAME_COLORS.border, ...GAME_SHADOWS.soft },
+  tabPressed: { transform: [{ scale: 0.95 }, { translateY: 2 }], opacity: 0.9 },
   primaryTab: {
     alignSelf: 'stretch',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
   },
   iconWrap: {
-    width: 34,
-    height: 30,
+    width: 43,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: GAME_RADII.control,
   },
   iconWrapActive: {
-    backgroundColor: 'rgba(112, 212, 246, 0.13)',
+    backgroundColor: GAME_COLORS.primarySoft,
   },
   primaryIconWrap: {
-    width: 60,
-    height: 60,
-    marginTop: -18,
-    borderRadius: 20,
-    backgroundColor: '#21455C',
+    width: 72,
+    height: 66,
+    marginTop: -24,
+    borderRadius: 22,
+    backgroundColor: GAME_COLORS.card,
     borderWidth: 2,
-    borderColor: 'rgba(143, 214, 244, 0.36)',
-    shadowColor: '#071522',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.32,
-    shadowRadius: 9,
-    elevation: 6,
+    borderColor: GAME_COLORS.border,
+    ...GAME_SHADOWS.raised,
   },
   primaryIconWrapActive: {
-    backgroundColor: '#7BD3F1',
-    borderColor: '#C8F1FF',
+    backgroundColor: GAME_COLORS.primarySoft,
+    borderColor: '#7FD8FA',
   },
   label: {
-    color: '#91A6BF',
-    fontSize: 7.5,
-    fontWeight: '800',
+    color: '#696879',
+    fontSize: 11,
+    fontWeight: '900',
     marginTop: 2,
   },
   labelActive: {
-    color: '#FFFFFF',
+    color: GAME_COLORS.ink,
   },
   activeDot: {
-    width: 14,
+    width: 22,
     height: 3,
     marginTop: 3,
     borderRadius: 3,
-    backgroundColor: '#76D8FA',
+    backgroundColor: GAME_COLORS.primary,
   },
 });

@@ -14,11 +14,13 @@ import House from 'lucide-react-native/icons/house';
 import LayoutGrid from 'lucide-react-native/icons/layout-grid';
 import LockKeyhole from 'lucide-react-native/icons/lock-keyhole';
 import Mountain from 'lucide-react-native/icons/mountain';
+import Move from 'lucide-react-native/icons/move';
 import RotateCw from 'lucide-react-native/icons/rotate-cw';
 import Settings from 'lucide-react-native/icons/settings';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import Store from 'lucide-react-native/icons/store';
 import TreePine from 'lucide-react-native/icons/tree-pine';
+import Trash from 'lucide-react-native/icons/trash';
 import UserRound from 'lucide-react-native/icons/user-round';
 import UsersRound from 'lucide-react-native/icons/users-round';
 import X from 'lucide-react-native/icons/x';
@@ -47,7 +49,9 @@ export type GameIconName =
   | 'nature'
   | 'decor'
   | 'special'
-  | 'footprint';
+  | 'footprint'
+  | 'move'
+  | 'delete';
 
 const ICONS: Record<GameIconName, LucideIcon> = {
   shop: Store,
@@ -73,6 +77,8 @@ const ICONS: Record<GameIconName, LucideIcon> = {
   decor: Armchair,
   special: Sparkles,
   footprint: Grid2X2,
+  move: Move,
+  delete: Trash,
 };
 
 export function GameIcon({
